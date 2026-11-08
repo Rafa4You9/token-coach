@@ -1,1 +1,1 @@
-{ "name": "token-coach", "version": "0.1.0", "author": { "name": "Rafa4You9" }, "description": "Ahorro de tokens: contexto, caché, cuándo compactar, modo director con subagentes y panel de agentes", "types": "./types/index.d.ts" }
+{ "name": "token-coach", "version": "0.2.0", "author": { "name": "Rafa4You9" }, "description": "Ahorro de tokens: contexto, caché, cuándo compactar, y modo director que delega en subagentes Haiku y Sonnet", "types": "./types/index.d.ts" }
