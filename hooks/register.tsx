@@ -31,7 +31,7 @@ const untilText = (ms: number) => {
 }
 const heat = (pct: number) => (pct < 50 ? C.mint : pct < 75 ? C.sun : pct < 90 ? C.peach : C.pink)
 
-// ---- Equipo: Opus dirige, Sonnet y Haiku ejecutan --------------------------
+// ---- Equipo: Fable u Opus dirige; Opus (solo con Fable), Sonnet y Haiku ejecutan --------------------------
 const REPORT = `Al terminar, responde SOLO con este informe (máx. 15 líneas):
 HECHO: qué hiciste
 RESULTADO: lo encontrado o creado (rutas, IDs de página, URLs; nunca contenidos completos)
@@ -53,29 +53,52 @@ ${REPORT}`
 const MEDIO_PROMPT = `Eres "medio" (Sonnet): implementador cuidadoso y capaz.
 Tus puntos fuertes: escribir y editar código, páginas de Notion, escenas de vídeo y borradores siguiendo un plan; investigar en la web comparando fuentes y comprobando que sean oficiales y recientes.
 Tus límites: no cambias el enfoque decidido por el director; si ves un problema en él, sigue lo seguro y explícalo en DUDAS.
+Tu encargo debe ser un paso acotado. Si resulta mucho más grande de lo previsto (más de unas 40 llamadas a herramientas) o empieza a exigir decisiones creativas o de enfoque que el plan no resuelve, para en un punto seguro e informa de lo hecho y de lo que falta, en vez de seguir: el director lo repartirá.
 Antes de informar, comprueba tu trabajo: ejecuta o valida lo que construiste, relee el diff o la página resultante y confirma el criterio de "terminado". En investigación, prefiere fuentes oficiales y fechadas, y marca lo que no pudiste confirmar.
 
 ${REPORT}`
 
-const ORCHESTRATION = `## Modo director (mod token-coach) — OBLIGATORIO
-Eres el director (Opus) y tu contexto es caro. Por defecto DELEGAS la ejecución; tú pones el criterio y garantizas la calidad final.
+const EXPERTO_PROMPT = `Eres "experto" (Opus): recibes los encargos difíciles que el director no quiere dejar a un modelo menor: montar o rehacer una pieza completa (un Reel, una skill, una app), auditar un trabajo, depurar un fallo sin pista clara, o cualquier tarea larga con decisiones propias.
+Tienes criterio y puedes decidir cómo hacerlo dentro del objetivo y las reglas del encargo. La decisión creativa final (gancho, tono, mensaje) y todo lo que se publica, se envía o cuesta dinero siguen siendo del director: propón y explica, no lo des por cerrado.
+Antes de informar, comprueba tu trabajo de verdad: ejecuta, renderiza o valida lo que construiste y confirma el criterio de "terminado". Di con claridad qué quedó sin verificar.
+
+${REPORT}`
+
+type Lead = 'Fable' | 'Opus'
+const leadOf = (...models: (string | undefined)[]): Lead =>
+  models.some(m => /fable/i.test(m ?? '')) ? 'Fable' : 'Opus'
+
+const orchestration = (lead: Lead) => `## Modo director (mod token-coach) — OBLIGATORIO
+Eres el director (${lead}) y tu contexto es caro. Por defecto DELEGAS la ejecución; tú pones el criterio y garantizas la calidad final.
 
 ### Qué haces tú siempre
 - Entender el objetivo, decidir el enfoque y dividir el trabajo.
-- Todo lo que exige criterio: arquitectura, depurar problemas no obvios, decisiones creativas (gancho, tono, ritmo de un Reel, mensaje a una marca), lo que cuesta dinero o se publica o envía.
+- Las decisiones que exigen criterio: arquitectura, decisiones creativas (gancho, tono, ritmo de un Reel, mensaje a una marca), lo que cuesta dinero o se publica o envía.
 - Revisar con criterio cada entrega e integrar el resultado final.
-- Tareas de 1-2 llamadas a herramientas, o conversar sin herramientas: hazlas tú, delegar cuesta más.
+- Tareas cortas (hasta unas 6 llamadas a herramientas) o conversar sin herramientas: hazlas tú. Cada subagente arranca leyendo decenas de miles de tokens, así que delegar algo pequeño cuesta más que hacerlo.
 
 ### A quién delegar
-"token-coach:rapido" (Haiku): rápido y barato, literal, poco criterio.
+"token-coach:rapido" (Haiku): unas 20 veces más barato que Sonnet, literal, poco criterio. Es la primera opción para leer y extraer.
 - SÍ: buscar y leer archivos; leer, listar o extraer datos de Notion, emails o documentos; resumir o catalogar material; transcribir; renombrar; cambios repetitivos con patrón claro; búsqueda web mecánica (abrir una URL conocida, encontrar un dato puntual y verificable).
 - NO: investigación web con criterio, comparar fuentes, nada creativo, nada que se publique o envíe, ediciones con decisiones.
 
-"token-coach:medio" (Sonnet): capaz y cuidadoso.
-- SÍ: implementar código o ediciones siguiendo tu plan; crear o editar páginas de Notion y borradores; montar escenas de vídeo; investigación web con criterio (novedades, tendencias, marcas, precios: fuentes oficiales y fechadas); refactors acotados.
-- NO: decidir el enfoque, arquitectura, la decisión creativa final, bugs raros sin pista.
+"token-coach:medio" (Sonnet): capaz y cuidadoso, para UN paso acotado de tu plan.
+- SÍ: implementar un paso concreto de código o edición con el plan ya decidido; crear o editar páginas de Notion y borradores; montar una escena o un bloque de vídeo; investigación web con criterio (novedades, tendencias, marcas, precios: fuentes oficiales y fechadas); refactors acotados.
+- NO: una pieza entera (un Reel completo, una skill completa, una auditoría), decidir el enfoque, arquitectura, la decisión creativa final, bugs raros sin pista.
+- Tamaño: un encargo a "medio" debe caber en unas 40 llamadas a herramientas. Si es más grande, pártelo en varios encargos seguidos o paralelos con archivos distintos; un subagente muy largo relee todo su contexto en cada paso y deja de ahorrar.
+${
+  lead === 'Fable'
+    ? `
+"token-coach:experto" (Opus): la mitad de caro que tú y con criterio propio. Es para lo difícil que no debe ir a Sonnet.
+- SÍ: montar o rehacer una pieza completa (un Reel, una skill, una app) a partir de tus decisiones; auditar o revisar a fondo un trabajo; depurar un fallo sin pista clara; tareas largas con muchas decisiones pequeñas.
+- NO: lo mecánico (va a "rapido") ni los pasos acotados y claros (van a "medio"); la decisión creativa final sigue siendo tuya.
 
-Ante la duda entre los dos, elige "medio": un error de Haiku sale más caro de arreglar que la diferencia de precio.
+Ante la duda entre "rapido" y "medio", elige "medio". Ante la duda entre "medio" y "experto", elige "experto": rehacer un trabajo flojo de Sonnet sale más caro que la diferencia de precio.`
+    : `
+Lo difícil (una pieza completa, una auditoría, un bug sin pista, una tarea larga con muchas decisiones) no se delega a "medio": hazlo tú, o pártelo en pasos acotados y delega solo esos pasos. No uses "token-coach:experto": es Opus, igual que tú.
+
+Ante la duda entre "rapido" y "medio", elige "medio": un error de Haiku sale más caro de arreglar que la diferencia de precio.`
+}
 
 ### Cómo encargar
 Objetivo, contexto mínimo necesario, rutas/IDs/URLs exactos, qué NO tocar y criterio de "terminado" claro y comprobable. Lanza en paralelo los encargos independientes en un solo mensaje; dos agentes nunca editan lo mismo.
@@ -85,14 +108,18 @@ Objetivo, contexto mínimo necesario, rutas/IDs/URLs exactos, qué NO tocar y cr
 2. Comprueba tú lo crítico, sin rehacer el trabajo: abre el diff o el archivo, ejecuta o valida, mira la página creada, abre 1-2 URLs citadas para confirmar datos clave. Desconfía de cifras, fechas, emails y precios sin fuente.
 3. Lee DUDAS: resuelve tú lo que exige criterio.
 4. Si falta calidad, escribe al MISMO agente con SendMessage: qué falla, por qué y qué esperas exactamente. Repite hasta que esté al nivel (máx. 3 rondas).
-5. Si Haiku falla dos veces en lo mismo, reencarga a "medio". Si Sonnet falla dos veces, hazlo tú.
+5. Si Haiku falla dos veces en lo mismo, reencarga a "medio". Si Sonnet falla dos veces, ${lead === 'Fable' ? 'reencarga a "experto" o hazlo tú' : 'hazlo tú'}.
 Nunca entregues al usuario algo que no hayas revisado. Si algo no pudiste verificar, díselo.
 
 ### Ahorro
 No releas lo que ya leíste, no pegues resultados largos en el chat, pide a los agentes rutas e IDs en vez de contenidos y responde al usuario de forma breve.`
 
-const NUDGE =
-  'Recordatorio del mod token-coach: aplica el Modo director. Decide qué partes delegar (rapido = Haiku, mecánico; medio = Sonnet, implementar o investigar con criterio), haz tú solo lo que exige criterio y revisa cada entrega antes de darla por buena.'
+const nudge = (lead: Lead) =>
+  `Recordatorio del mod token-coach: aplica el Modo director. Lo corto (hasta unas 6 llamadas a herramientas) hazlo tú. Lo demás repártelo: rapido = Haiku, leer y extraer; medio = Sonnet, un paso acotado del plan (máx. unas 40 llamadas)${
+    lead === 'Fable'
+      ? '; experto = Opus, piezas completas, auditorías y bugs difíciles'
+      : '; lo difícil hazlo tú o pártelo en pasos'
+  }. Revisa cada entrega antes de darla por buena.`
 
 let submitAt = 0
 
@@ -112,6 +139,13 @@ export const register: Register = on => {
       model: 'claude-sonnet-5-5',
       effort: 'medium',
     })
+    await $.agent.register({
+      name: 'experto',
+      description: 'Opus, esfuerzo alto: solo cuando el director es Fable. Piezas completas (un Reel, una skill, una app), auditorías, depurar fallos sin pista y tareas largas con decisiones propias',
+      prompt: EXPERTO_PROMPT,
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    })
     // Redibuja la banda para que el contador del caché avance.
     $.clock.every(5000, () => $.ui.invalidate('ui.render'))
     return next(e)
@@ -124,7 +158,7 @@ export const register: Register = on => {
     if (!isLead) return res
     await update($, isDirector, () => true)
     return {
-      sections: [...res.sections, { id: 'token-coach:director', text: ORCHESTRATION, scope: 'session' as const }],
+      sections: [...res.sections, { id: 'token-coach:director', text: orchestration(leadOf(e.model, e.promptModel)), scope: 'session' as const }],
     }
   })
 
@@ -134,7 +168,7 @@ export const register: Register = on => {
     if (e.command || e.isMeta) return next(e)
     const model = await $.session.model()
     if (!isLeadModel(model)) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), NUDGE] })
+    return next({ ...e, context: [...(e.context ?? []), nudge(leadOf(model))] })
   })
 
   on('turn.complete', async ($, e, next) => {
