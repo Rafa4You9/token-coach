@@ -18,7 +18,33 @@ const C = {
 }
 
 const MIN = 60 * 1000
-const isLeadModel = (model: string) => /opus|fable/i.test(model)
+const isFable = (model?: string) => /fable/i.test(model ?? '')
+// Solo Opus dirige. Fable ya no dirige ni delega: recibe un aviso para cambiar de modelo.
+const isLeadModel = (model?: string) => /opus/i.test(model ?? '') && !isFable(model)
+
+// ---- Aviso de modelo y tips de ahorro ---------------------------------------
+const FABLE_GUARD = `## Aviso de modelo (mod token-coach) — OBLIGATORIO
+Esta sesión usa Fable, el modelo más caro. Regla de la casa: Opus es el modelo de trabajo (incluido el draft completo de un Reel); Sonnet para lo mecánico; Fable solo para decisiones creativas atascadas, estrategia o rediseñar un sistema.
+- Si lo que pide el usuario es trabajo rutinario (editar un Reel, Notion, emails y marcas, métricas, carruseles, código normal, buscar, leer o resumir), empieza tu respuesta con UNA línea: "💡 Esto lo hace igual Opus (o Sonnet) y gasta mucho menos: cambia el modelo en el selector y repíteme el mensaje."
+- Si además es un trabajo grande (más de unas pocas llamadas a herramientas), para ahí y pregunta "¿Sigo en Fable o cambias de modelo?" antes de gastar. Si es pequeño, o el usuario ya dijo que siga en Fable, hazlo sin repetir el aviso.
+- No actúes de director ni delegues en subagentes para ahorrar: aquí el ahorro es cambiar de modelo.`
+
+const TIPS = `## Tips de ahorro (mod token-coach)
+Cuando aplique, añade al FINAL de tu respuesta una sola línea que empiece por "💡" (máximo una por respuesta; no repitas el mismo tip dos respuestas seguidas):
+- El mensaje es una tarea nueva, sin relación con lo hecho en esta sesión, y la sesión ya tiene trabajo → "Tarea nueva: mejor ábrela en una sesión nueva; esta arrastra todo su contexto en cada mensaje."
+- El usuario pega textos o resultados muy largos → "Pásame la ruta o el enlace en vez de pegar el texto: gasta menos."
+- Varios Reels o piezas en la misma sesión → "Una pieza por sesión: sale más rápido y más barato."
+Y tú: no pegues resultados largos en el chat, no releas lo que ya leíste y responde breve.`
+
+const FABLE_NUDGE =
+  'Recordatorio del mod token-coach: esta sesión está en Fable (el modelo más caro). Si la tarea es rutinaria, avisa en la primera línea de que Opus o Sonnet la hacen igual; si además es grande, pregunta antes de seguir. No dirijas ni delegues.'
+
+const contextTip = (percent: number, n: number) =>
+  percent >= 85 || (percent >= 70 && n > 40)
+    ? `Aviso del mod token-coach: el contexto está al ${Math.round(percent)}%. Termina tu respuesta con la línea "💡 Esta sesión está muy llena: abre una sesión nueva para lo siguiente."`
+    : percent >= 65
+      ? `Aviso del mod token-coach: el contexto está al ${Math.round(percent)}%. Termina tu respuesta con la línea "💡 La sesión se está alargando: escribe /compact antes de seguir."`
+      : null
 
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : `${n}`)
 const mmss = (ms: number) => {
@@ -31,7 +57,7 @@ const untilText = (ms: number) => {
 }
 const heat = (pct: number) => (pct < 50 ? C.mint : pct < 75 ? C.sun : pct < 90 ? C.peach : C.pink)
 
-// ---- Equipo: Fable u Opus dirige; Opus (solo con Fable), Sonnet y Haiku ejecutan --------------------------
+// ---- Equipo: Opus dirige; Sonnet y Haiku ejecutan. Fable no dirige (v0.5.0) --------------------------
 const REPORT = `Al terminar, responde SOLO con este informe (máx. 15 líneas):
 HECHO: qué hiciste
 RESULTADO: lo encontrado o creado (rutas, IDs de página, URLs; nunca contenidos completos)
@@ -139,13 +165,6 @@ export const register: Register = on => {
       model: 'claude-sonnet-5-5',
       effort: 'medium',
     })
-    await $.agent.register({
-      name: 'experto',
-      description: 'Opus, esfuerzo alto: solo cuando el director es Fable. Piezas completas (un Reel, una skill, una app), auditorías, depurar fallos sin pista y tareas largas con decisiones propias',
-      prompt: EXPERTO_PROMPT,
-      model: 'claude-opus-5-5',
-      effort: 'high',
-    })
     // Redibuja la banda para que el contador del caché avance.
     $.clock.every(5000, () => $.ui.invalidate('ui.render'))
     return next(e)
@@ -154,11 +173,16 @@ export const register: Register = on => {
   // Regla fija en el system prompt del chat principal (Opus/Fable con Agent).
   on('prompt.compose', async ($, e, next) => {
     const res = await next(e)
+    const tips = { id: 'token-coach:tips', text: TIPS, scope: 'session' as const }
+    if (isFable(e.model) || isFable(e.promptModel)) {
+      await update($, isDirector, () => false)
+      return { sections: [...res.sections, { id: 'token-coach:modelo', text: FABLE_GUARD, scope: 'session' as const }, tips] }
+    }
     const isLead = (isLeadModel(e.model) || isLeadModel(e.promptModel)) && e.tools.includes('Agent')
-    if (!isLead) return res
+    if (!isLead) return { sections: [...res.sections, tips] }
     await update($, isDirector, () => true)
     return {
-      sections: [...res.sections, { id: 'token-coach:director', text: orchestration(leadOf(e.model, e.promptModel)), scope: 'session' as const }],
+      sections: [...res.sections, { id: 'token-coach:director', text: orchestration('Opus'), scope: 'session' as const }, tips],
     }
   })
 
@@ -167,8 +191,16 @@ export const register: Register = on => {
     submitAt = await $.clock.now()
     if (e.command || e.isMeta) return next(e)
     const model = await $.session.model()
-    if (!isLeadModel(model)) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), nudge(leadOf(model))] })
+    const extra: string[] = []
+    if (isFable(model)) extra.push(FABLE_NUDGE)
+    else if (isLeadModel(model)) extra.push(nudge('Opus'))
+    try {
+      const raw = await $.session.usage()
+      const tip = contextTip(raw.context?.percent ?? 0, await read($, turns))
+      if (tip) extra.push(tip)
+    } catch {}
+    if (!extra.length) return next(e)
+    return next({ ...e, context: [...(e.context ?? []), ...extra] })
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -224,6 +256,7 @@ export const register: Register = on => {
           <Text color={C.sky}>reinicio en {untilText(Date.parse(five.resetsAt) - t)}</Text>
         )}
         {director && <Text color={C.lav}>director ✓</Text>}
+        {isFable(model) && <Text color={C.pink}>Fable: ¿hace falta? Opus gasta menos</Text>}
         {tip && <Text color={tip.color}>{tip.word}</Text>}
       </Box>
     )

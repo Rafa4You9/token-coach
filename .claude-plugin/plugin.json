@@ -1,1 +1,1 @@
-{ "name": "token-coach", "version": "0.4.0", "author": { "name": "Rafa4You9" }, "description": "Ahorro de tokens: contexto, caché, cuándo compactar, y modo director que delega en subagentes Haiku, Sonnet y (con Fable) Opus", "types": "./types/index.d.ts" }
+{ "name": "token-coach", "version": "0.5.0", "author": { "name": "Rafa4You9" }, "description": "Ahorro de tokens: contexto, caché, cuándo compactar, tips en el chat, aviso cuando se usa Fable sin necesidad, y modo director solo con Opus (delega en Haiku y Sonnet)", "types": "./types/index.d.ts" }
